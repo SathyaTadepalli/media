@@ -77,7 +77,7 @@ public class WaveformAudioBufferSink implements TeeAudioProcessor.AudioBufferSin
     public void addSample(@FloatRange(from = -1, to = 1) float sample) {
       checkArgument(sample >= -1f && sample <= 1f);
       minSampleValue = min(minSampleValue, sample);
-      maxSampleValue = max(maxSampleValue, sample);
+      maxSampleValue = max(maxSampleValue, Math.abs(sample));
       squareSum += (double) sample * sample;
       sampleCount++;
     }
