@@ -149,7 +149,7 @@ public final class WaveformAudioBufferSinkTest {
   @Test
   public void handleBuffer_customWaveformBarFactory_usesCustomFactory() throws Exception {
     // Custom WaveformBar that tracks when it's created
-    class TrackedWaveformBar extends WaveformAudioBufferSink.WaveformBar {
+    class TrackedWaveformBar extends WaveformAudioBufferSink.DefaultWaveformBar {
     }
 
     // Custom factory that creates tracked bars
@@ -208,7 +208,7 @@ public final class WaveformAudioBufferSinkTest {
       throws InterruptedException {
     List<WaveformAudioBufferSink.WaveformBar> channels = new ArrayList<>(outputChannelCount);
     for (int i = 0; i < outputChannelCount; i++) {
-      channels.add(new WaveformAudioBufferSink.WaveformBar());
+      channels.add(new WaveformAudioBufferSink.DefaultWaveformBar());
     }
     CountDownLatch countDownLatch = new CountDownLatch(outputChannelCount);
     WaveformAudioBufferSink waveformAudioBufferSink =
