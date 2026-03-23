@@ -38,15 +38,26 @@ public class WaveformAudioBufferSink implements TeeAudioProcessor.AudioBufferSin
    * Aggregates a group of audio samples. The values exposed can be used to draw one vertical bar of
    * an audio waveform.
    */
-  public interface WaveformBar {
+  public static class WaveformBar {
+    private float minSampleValue = 1f;
+    private float maxSampleValue = -1f;
+    private double squareSum;
+    private int sampleCount;
+
     /** Returns the number of samples {@linkplain #addSample added}. */
-    int getSampleCount();
+    public int getSampleCount() {
+      return sampleCount;
+    }
 
     /** Returns the minimum sample value in this group, normalized between -1 and +1. */
-    double getMinSampleValue();
+    public double getMinSampleValue() {
+      return minSampleValue;
+    }
 
     /** Returns the maximum sample value in this group, normalized between -1 and +1. */
-    double getMaxSampleValue();
+    public double getMaxSampleValue() {
+      return maxSampleValue;
+    }
 
     /**
      * Returns the RMS (Root Mean Square) of the samples in this group, normalized between -1 and
@@ -54,44 +65,15 @@ public class WaveformAudioBufferSink implements TeeAudioProcessor.AudioBufferSin
      *
      * <p>This an estimate of the audio loudness level.
      */
-    double getRootMeanSquare();
+    public double getRootMeanSquare() {
+      return Math.sqrt(squareSum / sampleCount);
+    }
 
     /**
      * Adds a new sample to the group.
      *
      * @param sample The sample value, between -1 and +1.
      */
-    void addSample(@FloatRange(from = -1, to = 1) float sample);
-  }
-
-  /** Default implementation of {@link WaveformBar}. */
-  public static class DefaultWaveformBar implements WaveformBar {
-    private float minSampleValue = 1f;
-    private float maxSampleValue = -1f;
-    private double squareSum;
-    private int sampleCount;
-
-    @Override
-    public int getSampleCount() {
-      return sampleCount;
-    }
-
-    @Override
-    public double getMinSampleValue() {
-      return minSampleValue;
-    }
-
-    @Override
-    public double getMaxSampleValue() {
-      return maxSampleValue;
-    }
-
-    @Override
-    public double getRootMeanSquare() {
-      return Math.sqrt(squareSum / sampleCount);
-    }
-
-    @Override
     public void addSample(@FloatRange(from = -1, to = 1) float sample) {
       checkArgument(sample >= -1f && sample <= 1f);
       minSampleValue = min(minSampleValue, sample);
@@ -110,7 +92,7 @@ public class WaveformAudioBufferSink implements TeeAudioProcessor.AudioBufferSin
   public static class WaveformBarFactory {
     /** Called when a new waveform bar has to be created */
     WaveformBar createWaveformBar() {
-      return new DefaultWaveformBar();
+      return new WaveformBar();
     }
   }
 
