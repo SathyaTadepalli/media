@@ -993,11 +993,13 @@ class CompositionPreviewViewModel(application: Application) : AndroidViewModel(a
         CompositionPlayer.Builder(getApplication())
           .setNativeHardwareBufferHelpers(HardwareBufferJni.INSTANCE)
           .setFrameProcessorFactory(
-            DefaultGlFrameProcessor.Factory(
-              getApplication(),
-              checkNotNull(playbackGlObjectsProvider),
-              HardwareBufferJni.INSTANCE,
-              checkNotNull(playbackGlExecutorService),
+            FrameOutOfClipRangeLoggingFrameProcessorFactory(
+              DefaultGlFrameProcessor.Factory(
+                getApplication(),
+                checkNotNull(playbackGlObjectsProvider),
+                HardwareBufferJni.INSTANCE,
+                checkNotNull(playbackGlExecutorService),
+              )
             )
           )
     } else {
