@@ -685,7 +685,7 @@ public final class CompositionPlayer extends SimpleBasePlayer {
   private AudioAttributes audioAttributes;
   private boolean handleAudioFocus;
   private boolean waitingForFrameAfterSeek;
-  private long pendingSeekPositionMs;
+  private long pendingSeekPositionUs;
 
   // "this" reference for position suppliers.
   @SuppressWarnings("initialization:methodref.receiver.bound.invalid")
@@ -717,7 +717,7 @@ public final class CompositionPlayer extends SimpleBasePlayer {
     totalBufferedDurationSupplier = new LivePositionSupplier(this::getTotalBufferedDurationMs);
     audioAttributes = builder.audioAttributes;
     handleAudioFocus = builder.handleAudioFocus;
-    pendingSeekPositionMs = C.TIME_UNSET;
+    pendingSeekPositionUs = C.TIME_UNSET;
     appNeedsToPrepareCompositionPlayer = true;
     internalListener = new InternalListener();
     audioFocusManager =
@@ -902,9 +902,9 @@ public final class CompositionPlayer extends SimpleBasePlayer {
 
       // Bypass debouncing for the final seek when scrubbing ends.
       waitingForFrameAfterSeek = false;
-      if (pendingSeekPositionMs != C.TIME_UNSET) {
-        long pendingSeekPosition = pendingSeekPositionMs;
-        pendingSeekPositionMs = C.TIME_UNSET;
+      if (pendingSeekPositionUs != C.TIME_UNSET) {
+        long pendingSeekPosition = pendingSeekPositionUs;
+        pendingSeekPositionUs = C.TIME_UNSET;
         handleSeekInternal(pendingSeekPosition);
       }
     }
@@ -966,6 +966,43 @@ public final class CompositionPlayer extends SimpleBasePlayer {
    */
   public Clock getClock() {
     return clock;
+  }
+
+  /**
+   * Returns the current playback position in the composition, in microseconds.
+   *
+   * <p>This is the microsecond-resolution counterpart of {@link #getCurrentPosition()}.
+   */
+  public long getCurrentPositionUs() {
+    verifyApplicationThread();
+    if (playerHolders.isEmpty()) {
+      return 0;
+    }
+
+    long currentPositionUs = 0;
+    for (int i = 0; i < playerHolders.size(); i++) {
+      currentPositionUs =
+          max(currentPositionUs, playerHolders.get(i).player.getContentPositionUs());
+    }
+    return currentPositionUs;
+  }
+
+  /**
+   * Seeks to a position in the composition, in microseconds.
+   *
+   * <p>This is the microsecond-resolution counterpart of {@link #seekTo(long)}. Position values in
+   * {@link Player.Listener} callbacks remain expressed in milliseconds, as required by the {@link
+   * Player} interface.
+   *
+   * @param positionUs The seek position, in microseconds.
+   */
+  public void seekToUs(long positionUs) {
+    verifyApplicationThread();
+    if (!getAvailableCommands().contains(COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM)) {
+      return;
+    }
+    handleSeekInternal(positionUs);
+    invalidateState();
   }
 
   // SimpleBasePlayer methods
@@ -1044,7 +1081,7 @@ public final class CompositionPlayer extends SimpleBasePlayer {
     }
     appNeedsToPrepareCompositionPlayer = true;
     waitingForFrameAfterSeek = false;
-    pendingSeekPositionMs = C.TIME_UNSET;
+    pendingSeekPositionUs = C.TIME_UNSET;
     updatePlaybackState();
     return Futures.immediateVoidFuture();
   }
@@ -1066,7 +1103,7 @@ public final class CompositionPlayer extends SimpleBasePlayer {
     playerHolders.clear();
     boolean internalPlayerSuccessfullyReleased = checkNotNull(compositionPlayerInternal).release();
     waitingForFrameAfterSeek = false;
-    pendingSeekPositionMs = C.TIME_UNSET;
+    pendingSeekPositionUs = C.TIME_UNSET;
     removeSurfaceCallbacks();
     // TODO: b/518679527 - Move close calls of frameAggregator and frameProcessor to the
     // playback thread.
@@ -1140,31 +1177,31 @@ public final class CompositionPlayer extends SimpleBasePlayer {
   @Override
   protected ListenableFuture<?> handleSeek(
       int mediaItemIndex, long positionMs, @Command int seekCommand) {
-    handleSeekInternal(positionMs);
+    handleSeekInternal(Util.msToUs(positionMs));
     return Futures.immediateVoidFuture();
   }
 
-  private void handleSeekInternal(long positionMs) {
+  private void handleSeekInternal(long positionUs) {
     resetLivePositionSuppliers();
     DebugTraceUtil.logEvent(
         COMPONENT_COMPOSITION_PLAYER,
         EVENT_SEEK_TO,
         /* presentationTimeUs= */ C.TIME_UNSET,
-        "positionMs=%d",
-        positionMs);
+        "positionUs=%d",
+        positionUs);
 
     if (frameProcessor != null) {
       if (waitingForFrameAfterSeek) {
-        pendingSeekPositionMs = positionMs;
+        pendingSeekPositionUs = positionUs;
         return;
       }
       waitingForFrameAfterSeek = true;
     }
     CompositionPlayerInternal compositionPlayerInternal =
         checkNotNull(this.compositionPlayerInternal);
-    compositionPlayerInternal.startSeek(positionMs);
+    compositionPlayerInternal.startSeek(positionUs);
     for (int i = 0; i < playerHolders.size(); i++) {
-      playerHolders.get(i).player.seekTo(positionMs);
+      playerHolders.get(i).player.seekToUs(positionUs);
       // Flush the HardwareBufferFrameReader and FrameAggregator after the player seeks to ensure
       // frames from before the seek do not race with the flush calls.
       if (frameProcessor != null) {
@@ -1531,7 +1568,7 @@ public final class CompositionPlayer extends SimpleBasePlayer {
 
   private void setCompositionInternal(Composition composition, long startPositionMs) {
     waitingForFrameAfterSeek = false;
-    pendingSeekPositionMs = C.TIME_UNSET;
+    pendingSeekPositionUs = C.TIME_UNSET;
     for (int i = 0; i < playerHolders.size(); i++) {
       // TODO: b/412585856 - Optimize for the case where we can keep some resources.
       playerHolders.get(i).release();
@@ -1564,7 +1601,7 @@ public final class CompositionPlayer extends SimpleBasePlayer {
           composition, /* sequenceIndex= */ i, primarySequenceDurationUs, startPositionMs);
     }
     compositionPlayerInternal.setComposition(composition);
-    compositionPlayerInternal.startSeek(startPositionMs);
+    compositionPlayerInternal.startSeek(Util.msToUs(startPositionMs));
     compositionPlayerInternal.endSeek();
 
     if (appNeedsToPrepareCompositionPlayer) {
@@ -2004,7 +2041,7 @@ public final class CompositionPlayer extends SimpleBasePlayer {
   private void maybeUpdatePlaybackError(
       String errorMessage, Exception cause, @PlaybackException.ErrorCode int errorCode) {
     waitingForFrameAfterSeek = false;
-    pendingSeekPositionMs = C.TIME_UNSET;
+    pendingSeekPositionUs = C.TIME_UNSET;
     if (playbackException == null) {
       playbackException = new PlaybackException(errorMessage, cause, errorCode);
       for (int i = 0; i < playerHolders.size(); i++) {
@@ -2506,9 +2543,9 @@ public final class CompositionPlayer extends SimpleBasePlayer {
           () -> {
             if (waitingForFrameAfterSeek) {
               waitingForFrameAfterSeek = false;
-              if (pendingSeekPositionMs != C.TIME_UNSET) {
-                long pendingSeekPosition = pendingSeekPositionMs;
-                pendingSeekPositionMs = C.TIME_UNSET;
+              if (pendingSeekPositionUs != C.TIME_UNSET) {
+                long pendingSeekPosition = pendingSeekPositionUs;
+                pendingSeekPositionUs = C.TIME_UNSET;
                 handleSeekInternal(pendingSeekPosition);
               }
             }

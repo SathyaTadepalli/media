@@ -666,6 +666,19 @@ public class CompositionPlayerTest {
   }
 
   @Test
+  public void seekToUs_preservesMicrosecondPosition() throws Exception {
+    player = createTestCompositionPlayer();
+    player.setComposition(buildComposition());
+    player.prepare();
+    advance(player).untilState(STATE_READY);
+
+    player.seekToUs(/* positionUs= */ 100_123);
+
+    assertThat(player.getCurrentPositionUs()).isEqualTo(100_123);
+    assertThat(player.getCurrentPosition()).isEqualTo(100);
+  }
+
+  @Test
   public void stop_playbackStateIsIdle() throws Exception {
     player = createTestCompositionPlayer();
     player.setComposition(buildComposition());

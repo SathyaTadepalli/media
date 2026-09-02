@@ -49,6 +49,8 @@
     *   Remove experimental
         `DefaultMediaCodecAdapterFactory.setAsyncCryptoSynchronizationEnabled(boolean)`.
 *   CompositionPlayer:
+    *   Add `getCurrentPositionUs()` and `seekToUs(long)` for microsecond-resolution
+        position queries and seeking.
     *   Support configuring the frame rate of video frame aggregation via
         `Composition.Builder.setVideoFrameAggregationParameters` for playback
         workflows.

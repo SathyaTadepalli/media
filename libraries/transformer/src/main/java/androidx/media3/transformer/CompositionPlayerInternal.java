@@ -32,7 +32,6 @@ import androidx.media3.common.util.ConditionVariable;
 import androidx.media3.common.util.HandlerWrapper;
 import androidx.media3.common.util.Log;
 import androidx.media3.common.util.Size;
-import androidx.media3.common.util.Util;
 import androidx.media3.exoplayer.video.PlaybackVideoGraphWrapper;
 
 /** Provides access to the composition preview audio and video components on the playback thread. */
@@ -170,8 +169,8 @@ import androidx.media3.exoplayer.video.PlaybackVideoGraphWrapper;
         .sendToTarget();
   }
 
-  public void startSeek(long positionMs) {
-    handler.obtainMessage(MSG_START_SEEK, positionMs).sendToTarget();
+  public void startSeek(long positionUs) {
+    handler.obtainMessage(MSG_START_SEEK, positionUs).sendToTarget();
   }
 
   public void endSeek() {
@@ -257,7 +256,7 @@ import androidx.media3.exoplayer.video.PlaybackVideoGraphWrapper;
         case MSG_START_SEEK:
           // Video seeking is currently handled by the video renderers, specifically in
           // onPositionReset.
-          playbackAudioGraphWrapper.startSeek(/* positionUs= */ Util.msToUs((long) message.obj));
+          playbackAudioGraphWrapper.startSeek(/* positionUs= */ (long) message.obj);
           break;
         case MSG_END_SEEK:
           playbackAudioGraphWrapper.endSeek();

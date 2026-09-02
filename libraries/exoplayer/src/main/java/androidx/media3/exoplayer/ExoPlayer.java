@@ -168,6 +168,30 @@ import java.util.List;
  */
 public interface ExoPlayer extends Player {
 
+  /**
+   * Seeks to a position in the current media item, in microseconds.
+   *
+   * <p>This method is intended for library components that need more precision than {@link
+   * Player#seekTo(long)} provides.
+   *
+   * @param positionUs The seek position, in microseconds.
+   */
+  @RestrictTo(LIBRARY_GROUP)
+  default void seekToUs(long positionUs) {
+    seekTo(Util.usToMs(positionUs));
+  }
+
+  /**
+   * Returns the current content position, in microseconds.
+   *
+   * <p>This method is intended for library components that need more precision than {@link
+   * Player#getContentPosition()} provides.
+   */
+  @RestrictTo(LIBRARY_GROUP)
+  default long getContentPositionUs() {
+    return Util.msToUs(getContentPosition());
+  }
+
   /** A listener for audio offload events. */
   @UnstableApi
   interface AudioOffloadListener {

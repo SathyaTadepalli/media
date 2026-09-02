@@ -256,7 +256,7 @@ import java.util.function.IntConsumer;
 
   // Playback information when there is a pending seek/set source operation.
   private int maskingWindowIndex;
-  private long maskingWindowPositionMs;
+  private long maskingWindowPositionUs;
   private long lastReturnedPositionUs;
 
   @SuppressLint("HandlerLeak")
@@ -960,6 +960,24 @@ import java.util.function.IntConsumer;
       long positionMs,
       @Player.Command int seekCommand,
       boolean isRepeatingCurrentItem) {
+    seekToUs(
+        mediaItemIndex, Util.msToUs(positionMs), seekCommand, isRepeatingCurrentItem);
+  }
+
+  @Override
+  public void seekToUs(long positionUs) {
+    seekToUs(
+        getCurrentMediaItemIndex(),
+        positionUs,
+        Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM,
+        /* isRepeatingCurrentItem= */ false);
+  }
+
+  private void seekToUs(
+      int mediaItemIndex,
+      long positionUs,
+      @Player.Command int seekCommand,
+      boolean isRepeatingCurrentItem) {
     verifyApplicationThread();
     if (mediaItemIndex == C.INDEX_UNSET) {
       return;
@@ -992,8 +1010,8 @@ import java.util.function.IntConsumer;
         maskTimelineAndPosition(
             newPlaybackInfo,
             timeline,
-            maskWindowPositionMsOrGetPeriodPositionUs(timeline, mediaItemIndex, positionMs));
-    internalPlayer.seekTo(timeline, mediaItemIndex, Util.msToUs(positionMs));
+            maskWindowPositionUsOrGetPeriodPositionUs(timeline, mediaItemIndex, positionUs));
+    internalPlayer.seekTo(timeline, mediaItemIndex, positionUs);
     updatePlaybackInfo(
         newPlaybackInfo,
         /* ignored */ TIMELINE_CHANGE_REASON_PLAYLIST_CHANGED,
@@ -1290,10 +1308,16 @@ import java.util.function.IntConsumer;
   }
 
   @Override
+  public long getContentPositionUs() {
+    verifyApplicationThread();
+    return getContentPositionUsInternal(playbackInfo);
+  }
+
+  @Override
   public long getContentBufferedPosition() {
     verifyApplicationThread();
     if (playbackInfo.timeline.isEmpty()) {
-      return maskingWindowPositionMs;
+      return Util.usToMs(maskingWindowPositionUs);
     }
     if (playbackInfo.loadingMediaPeriodId.windowSequenceNumber
         != playbackInfo.periodId.windowSequenceNumber) {
@@ -2211,21 +2235,25 @@ import java.util.function.IntConsumer;
   }
 
   private long getContentPositionInternal(PlaybackInfo playbackInfo) {
+    return Util.usToMs(getContentPositionUsInternal(playbackInfo));
+  }
+
+  private long getContentPositionUsInternal(PlaybackInfo playbackInfo) {
     if (playbackInfo.periodId.isAd()) {
       playbackInfo.timeline.getPeriodByUid(playbackInfo.periodId.periodUid, period);
       return playbackInfo.requestedContentPositionUs == C.TIME_UNSET
           ? playbackInfo
               .timeline
               .getWindow(getCurrentWindowIndexInternal(playbackInfo), window)
-              .getDefaultPositionMs()
-          : period.getPositionInWindowMs() + Util.usToMs(playbackInfo.requestedContentPositionUs);
+              .getDefaultPositionUs()
+          : period.getPositionInWindowUs() + playbackInfo.requestedContentPositionUs;
     }
-    return Util.usToMs(getCurrentPositionUsInternal(playbackInfo));
+    return getCurrentPositionUsInternal(playbackInfo);
   }
 
   private long getCurrentPositionUsInternal(PlaybackInfo playbackInfo) {
     if (playbackInfo.timeline.isEmpty()) {
-      return Util.msToUs(maskingWindowPositionMs);
+      return maskingWindowPositionUs;
     }
 
     long positionUs =
@@ -2268,7 +2296,7 @@ import java.util.function.IntConsumer;
         // Update the masking variables, which are used when the timeline becomes empty because a
         // ConcatenatingMediaSource has been cleared.
         maskingWindowIndex = C.INDEX_UNSET;
-        maskingWindowPositionMs = 0;
+        maskingWindowPositionUs = 0;
       }
       if (!newTimeline.isEmpty()) {
         List<Timeline> timelines = ((PlaylistTimeline) newTimeline).getChildTimelines();
@@ -2830,7 +2858,7 @@ import java.util.function.IntConsumer;
     if (timeline.isEmpty()) {
       // Reset periodId and loadingPeriodId.
       MediaPeriodId dummyMediaPeriodId = PlaybackInfo.getDummyPeriodForEmptyTimeline();
-      long positionUs = Util.msToUs(maskingWindowPositionMs);
+      long positionUs = maskingWindowPositionUs;
       playbackInfo =
           playbackInfo.copyWithNewPosition(
               dummyMediaPeriodId,
@@ -2995,19 +3023,26 @@ import java.util.function.IntConsumer;
   @Nullable
   private Pair<Object, Long> maskWindowPositionMsOrGetPeriodPositionUs(
       Timeline timeline, int windowIndex, long windowPositionMs) {
+    return maskWindowPositionUsOrGetPeriodPositionUs(
+        timeline, windowIndex, Util.msToUs(windowPositionMs));
+  }
+
+  @Nullable
+  private Pair<Object, Long> maskWindowPositionUsOrGetPeriodPositionUs(
+      Timeline timeline, int windowIndex, long windowPositionUs) {
     if (timeline.isEmpty()) {
       // If empty we store the initial seek in the masking variables.
       maskingWindowIndex = windowIndex;
-      maskingWindowPositionMs = windowPositionMs == C.TIME_UNSET ? 0 : windowPositionMs;
+      maskingWindowPositionUs = windowPositionUs == C.TIME_UNSET ? 0 : windowPositionUs;
       return null;
     }
     if (windowIndex == C.INDEX_UNSET || windowIndex >= timeline.getWindowCount()) {
       // Use default position of timeline if window index still unset or if a previous initial seek
       // now turns out to be invalid.
       windowIndex = timeline.getFirstWindowIndex(shuffleModeEnabled);
-      windowPositionMs = timeline.getWindow(windowIndex, window).getDefaultPositionMs();
+      windowPositionUs = timeline.getWindow(windowIndex, window).getDefaultPositionUs();
     }
-    return timeline.getPeriodPositionUs(window, period, windowIndex, Util.msToUs(windowPositionMs));
+    return timeline.getPeriodPositionUs(window, period, windowIndex, windowPositionUs);
   }
 
   private long periodPositionUsToWindowPositionUs(
