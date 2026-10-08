@@ -827,17 +827,24 @@ class CompositionPreviewViewModel(application: Application) : AndroidViewModel(a
 
       val sequenceBuilder = EditedMediaItemSequence.Builder(trackTypes)
 
-      for (item in sequenceItems) {
+      for ((itemIndex, item) in sequenceItems.withIndex()) {
         when (item) {
           is Gap -> {
             sequenceBuilder.addGap(item.durationUs)
           }
           is Media -> {
-            val mediaItem =
-              MediaItem.Builder()
-                .setUri(item.uri)
-                .setImageDurationMs(usToMs(item.durationUs)) // Ignored for audio/video
-                .build()
+            // Split the first media item of the first sequence into three clips if it is long
+            // enough.
+            val shouldSplit =
+              sequenceIndex == 0 &&
+                itemIndex == sequenceItems.indexOfFirst { it is Media } &&
+                item.durationUs > MIN_DURATION_FOR_SPLIT_US
+            val clipBoundariesUs =
+              if (shouldSplit) {
+                listOf(0L) + FIRST_SPLIT_POINTS_US + C.TIME_END_OF_SOURCE
+              } else {
+                listOf(0L, C.TIME_END_OF_SOURCE)
+              }
             val effectsForItem = mutableListOf<Effect>()
             for (effectName in item.selectedEffects) {
               // TODO(b/433484977): Order of applied effects should be more clear in the UI
@@ -852,18 +859,36 @@ class CompositionPreviewViewModel(application: Application) : AndroidViewModel(a
               }
             val speedParameters = SpeedParameters(speedProvider, /* shouldMaintainPitch= */ true)
 
-            val itemBuilder =
-              EditedMediaItem.Builder(mediaItem)
-                .setEffects(
-                  Effects(/* audioProcessors= */ emptyList(), /* videoEffects= */ finalVideoEffects)
+            for (clipIndex in 0 until clipBoundariesUs.size - 1) {
+              val mediaItemBuilder =
+                MediaItem.Builder()
+                  .setUri(item.uri)
+                  .setImageDurationMs(usToMs(item.durationUs)) // Ignored for audio/video
+              if (shouldSplit) {
+                mediaItemBuilder.setClippingConfiguration(
+                  MediaItem.ClippingConfiguration.Builder()
+                    .setStartPositionUs(clipBoundariesUs[clipIndex])
+                    .setEndPositionUs(clipBoundariesUs[clipIndex + 1])
+                    .build()
                 )
-                .setSpeed(speedParameters)
-                // Required for image inputs. For video inputs, it sets the target FPS.
-                .setFrameRate(DEFAULT_FRAME_RATE_FPS)
-                // Setting duration explicitly is only required for preview with CompositionPlayer,
-                // and is not needed for export with Transformer.
-                .setDurationUs(item.durationUs)
-            sequenceBuilder.addItem(itemBuilder.build())
+              }
+              val itemBuilder =
+                EditedMediaItem.Builder(mediaItemBuilder.build())
+                  .setEffects(
+                    Effects(
+                      /* audioProcessors= */ emptyList(),
+                      /* videoEffects= */ finalVideoEffects,
+                    )
+                  )
+                  .setSpeed(speedParameters)
+                  // Required for image inputs. For video inputs, it sets the target FPS.
+                  .setFrameRate(DEFAULT_FRAME_RATE_FPS)
+                  // Setting duration explicitly is only required for preview with
+                  // CompositionPlayer, and is not needed for export with Transformer. This is the
+                  // duration of the full media, before clipping.
+                  .setDurationUs(item.durationUs)
+              sequenceBuilder.addItem(itemBuilder.build())
+            }
           }
         }
       }
@@ -1120,6 +1145,10 @@ class CompositionPreviewViewModel(application: Application) : AndroidViewModel(a
     private const val TAG = "CompPreviewVM"
     private const val AUDIO_URI = "https://storage.googleapis.com/exoplayer-test-media-0/play.mp3"
     private const val DEFAULT_FRAME_RATE_FPS = 30
+    // Positions at which the first media item is split into three clips.
+    private val FIRST_SPLIT_POINTS_US = listOf(1_300_000L, 2_300_000L)
+    // The first media item is only split if it is longer than this duration.
+    private const val MIN_DURATION_FOR_SPLIT_US = 3_000_000L
     // A 3-second moving average window (rather than 1s) is used to smooth out micro-stutters
     // and provide a stable, readable real-time playback FPS value in the UI.
     private const val FPS_TRACKING_DURATION_MS = 3000L
