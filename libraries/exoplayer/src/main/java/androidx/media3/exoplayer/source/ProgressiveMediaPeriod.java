@@ -1268,7 +1268,11 @@ import org.checkerframework.checker.nullness.qual.MonotonicNonNull;
     }
     assertPrepared();
     Format format = trackState.tracks.get(trackIndex).getFormat(0);
-    if (SampleQueue.isDiscardingAllSamplesToStartTime(format)) {
+    // Decoder pre-roll samples of all-sync audio formats are dropped by the audio renderer, so they
+    // must not force a renderer reset at seamless period transitions.
+    if (SampleQueue.isDiscardingAllSamplesToStartTime(format)
+        || (SampleQueue.requiresDecoderPreroll(format.sampleMimeType)
+            && MimeTypes.allSamplesAreSyncSamples(format.sampleMimeType, format.codecs))) {
       return false;
     }
     if (seekMap.isSeekable()) {

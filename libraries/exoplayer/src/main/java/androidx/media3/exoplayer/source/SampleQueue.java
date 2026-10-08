@@ -1327,7 +1327,33 @@ public class SampleQueue implements TrackOutput {
     // duration of a sample is negligible, and it doesn't affect playback if a partial sample is
     // dropped.
     @C.TrackType int trackType = MimeTypes.getTrackType(mimeType);
-    return trackType == C.TRACK_TYPE_AUDIO && MimeTypes.allSamplesAreSyncSamples(mimeType, codecs);
+    return trackType == C.TRACK_TYPE_AUDIO
+        && MimeTypes.allSamplesAreSyncSamples(mimeType, codecs)
+        && !requiresDecoderPreroll(mimeType);
+  }
+
+  /**
+   * Returns whether decoding a sample of the given audio format depends on the previous sample.
+   *
+   * <p>Overlapped-transform codecs (MDCT overlap-add, MP3 hybrid filterbank) produce an attenuated,
+   * ramping first frame when decoding starts cold. Discarding the sample preceding the start time
+   * therefore causes an audible dip/click at clip starts, so those samples must reach the decoder
+   * as decode-only pre-roll.
+   */
+  /* package */ static boolean requiresDecoderPreroll(@Nullable String mimeType) {
+    if (mimeType == null) {
+      return false;
+    }
+    switch (mimeType) {
+      case MimeTypes.AUDIO_AAC:
+      case MimeTypes.AUDIO_MPEG:
+      case MimeTypes.AUDIO_AC3:
+      case MimeTypes.AUDIO_E_AC3:
+      case MimeTypes.AUDIO_E_AC3_JOC:
+        return true;
+      default:
+        return false;
+    }
   }
 
   /** A holder for sample metadata not held by {@link DecoderInputBuffer}. */

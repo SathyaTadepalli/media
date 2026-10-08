@@ -900,7 +900,9 @@ public class MediaCodecAudioRenderer extends MediaCodecRenderer implements Media
       return true;
     }
 
-    if (isDecodeOnlyBuffer) {
+    // Samples preceding the stream start are decoder pre-roll; at seamless stream transitions the
+    // renderer is not reset, so they aren't covered by the last reset position.
+    if (isDecodeOnlyBuffer || bufferPresentationTimeUs < getOutputStreamStartPositionUs()) {
       if (codec != null) {
         if (DEBUG_LOG_ENABLED) {
           Log.d(

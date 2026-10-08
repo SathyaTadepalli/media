@@ -73,12 +73,9 @@ import org.checkerframework.checker.nullness.qual.RequiresNonNull;
     }
 
     inputBuffer.timeUs -= streamStartPositionUs;
-    // Drop samples with negative timestamp in the transcoding case, to prevent encoder failures.
-    if (decoder != null && inputBuffer.timeUs < 0) {
-      inputBuffer.clear();
-      return true;
-    }
-
+    // In the transcoding case, samples with negative timestamps are still decoded as pre-roll so
+    // that the first output frame at the start position is not attenuated by a cold decoder start.
+    // Their decoded output is dropped in feedConsumerFromDecoder, to prevent encoder failures.
     return false;
   }
 
@@ -109,9 +106,15 @@ import org.checkerframework.checker.nullness.qual.RequiresNonNull;
         return false;
       }
 
+      MediaCodec.BufferInfo bufferInfo = checkNotNull(decoder.getOutputBufferInfo());
+      if (bufferInfo.presentationTimeUs < 0
+          && (bufferInfo.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) == 0) {
+        decoder.releaseOutputBuffer(/* render= */ false);
+        return true;
+      }
+
       sampleConsumerInputBuffer.ensureSpaceForWrite(decoderOutputBuffer.limit());
       sampleConsumerInputBuffer.data.put(decoderOutputBuffer).flip();
-      MediaCodec.BufferInfo bufferInfo = checkNotNull(decoder.getOutputBufferInfo());
       sampleConsumerInputBuffer.timeUs = bufferInfo.presentationTimeUs;
       sampleConsumerInputBuffer.setFlags(bufferInfo.flags);
       decoder.releaseOutputBuffer(/* render= */ false);

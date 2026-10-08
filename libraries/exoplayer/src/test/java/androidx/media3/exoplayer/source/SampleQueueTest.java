@@ -1063,7 +1063,7 @@ public final class SampleQueueTest {
 
     assertThat(SampleQueue.isDiscardingAllSamplesToStartTime(FORMAT_SYNC_SAMPLE_ONLY_1)).isTrue();
     assertThat(SampleQueue.isDiscardingAllSamplesToStartTime(FORMAT_1)).isFalse();
-    assertThat(SampleQueue.isDiscardingAllSamplesToStartTime(syncAudioAacWithCodecs)).isTrue();
+    assertThat(SampleQueue.isDiscardingAllSamplesToStartTime(syncAudioAacWithCodecs)).isFalse();
     assertThat(SampleQueue.isDiscardingAllSamplesToStartTime(syncAudioAacWithoutCodecs)).isFalse();
     assertThat(SampleQueue.isDiscardingAllSamplesToStartTime(syncAudioAacInvalidCodecs)).isFalse();
     assertThat(SampleQueue.isDiscardingAllSamplesToStartTime(syncAudioRaw)).isTrue();
