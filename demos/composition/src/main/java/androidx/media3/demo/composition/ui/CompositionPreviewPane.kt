@@ -338,6 +338,12 @@ internal fun CompositionPreviewPane(
       Button(onClick = onOpenExportOptions) {
         Text(text = stringResource(R.string.export_settings))
       }
+      Button(
+        onClick = { viewModel.runSourceNotFoundRepro() },
+        enabled = uiState.isCompositionSet,
+      ) {
+        Text(text = "Repro")
+      }
     }
   }
 }

@@ -123,6 +123,7 @@ import java.util.Objects;
           e, "Error while registering input " + inputInfos.size());
     }
     inputInfos.add(new InputInfo(audioGraphInput));
+    android.util.Log.w("SNFDebug", "registerInput isMixerReady=" + isMixerReady + " inputs=" + inputInfos.size());
     activeInputs++;
     DebugTraceUtil.logEvent(
         COMPONENT_AUDIO_GRAPH,
@@ -204,6 +205,7 @@ import java.util.Objects;
    */
   public void flush(@IntRange(from = 0) long positionOffsetUs) {
     this.pendingStartTimeUs = positionOffsetUs;
+    android.util.Log.w("SNFDebug", "flush pos=" + positionOffsetUs + " inputs=" + inputInfos.size());
 
     for (InputInfo info : inputInfos) {
       // Remove all mixer IDs even if input is released, as we are resetting mixer below.
@@ -372,6 +374,9 @@ import java.util.Objects;
   private void feedMixerFromInput(InputInfo inputInfo) throws ExportException {
     int sourceId = inputInfo.mixerSourceId;
     AudioGraphInput input = inputInfo.audioGraphInput;
+    if (!mixer.hasSource(sourceId)) {
+      android.util.Log.w("SNFDebug", "feeding unregistered sourceId=" + sourceId);
+    }
 
     try {
       mixer.queueInput(sourceId, input.getOutput());

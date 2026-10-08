@@ -88,6 +88,8 @@ import kotlin.math.roundToInt
 import kotlin.math.sin
 import kotlin.math.sqrt
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -644,6 +646,61 @@ class CompositionPreviewViewModel(application: Application) : AndroidViewModel(a
     compositionPlayer.play()
   }
 
+  private var reproJob: Job? = null
+
+  /**
+   * Repro for "Source not found." in DefaultAudioMixer: two frame-steps (scrubbing on, seek,
+   * scrubbing off), scrub back to zero, then play. Loops until a player error or [iterations].
+   */
+  fun runSourceNotFoundRepro(iterations: Int = 50) {
+    reproJob?.cancel()
+    val player = compositionPlayer
+    var failed = false
+    val errorListener =
+      object : Player.Listener {
+        override fun onPlayerError(error: PlaybackException) {
+          failed = true
+          Log.e(REPRO_TAG, "REPRODUCED", error)
+        }
+      }
+    player.addListener(errorListener)
+    reproJob =
+      viewModelScope.launch {
+        try {
+          for (i in 1..iterations) {
+            if (failed || player.playerError != null) break
+            Log.i(REPRO_TAG, "iteration $i start pos=${player.currentPosition}")
+            player.pause()
+            repeat(2) {
+              player.isScrubbingModeEnabled = true
+              player.seekTo(player.currentPosition + FRAME_STEP_MS)
+              player.isScrubbingModeEnabled = false
+              delay(REPRO_STEP_DELAY_MS)
+            }
+            player.isScrubbingModeEnabled = true
+            var pos = player.currentPosition
+            while (pos > 0) {
+              pos = maxOf(0L, pos - SCRUB_STEP_MS)
+              player.seekTo(pos)
+              delay(SCRUB_STEP_DELAY_MS)
+            }
+            player.isScrubbingModeEnabled = false
+            delay(REPRO_STEP_DELAY_MS * 4)
+            // Touch-down/up on the timeline without moving: scrubbing toggles with no seek.
+            player.isScrubbingModeEnabled = true
+            delay(REPRO_STEP_DELAY_MS * 4)
+            player.isScrubbingModeEnabled = false
+            player.play()
+            delay(REPRO_PLAY_DURATION_MS)
+          }
+          player.pause()
+          Log.i(REPRO_TAG, if (failed) "done: REPRODUCED" else "done: not reproduced")
+        } finally {
+          player.removeListener(errorListener)
+        }
+      }
+  }
+
   fun exportComposition() {
     // Cancel and clean up files from any ongoing export.
     cancelExport()
@@ -1118,6 +1175,12 @@ class CompositionPreviewViewModel(application: Application) : AndroidViewModel(a
     const val UNSET_OPTION = ""
     const val SAME_AS_INPUT_OPTION = "same as input"
     private const val TAG = "CompPreviewVM"
+    private const val REPRO_TAG = "SourceNotFoundRepro"
+    private const val FRAME_STEP_MS = 33L
+    private const val SCRUB_STEP_MS = 200L
+    private const val SCRUB_STEP_DELAY_MS = 16L
+    private const val REPRO_STEP_DELAY_MS = 50L
+    private const val REPRO_PLAY_DURATION_MS = 700L
     private const val AUDIO_URI = "https://storage.googleapis.com/exoplayer-test-media-0/play.mp3"
     private const val DEFAULT_FRAME_RATE_FPS = 30
     // A 3-second moving average window (rather than 1s) is used to smooth out micro-stutters
