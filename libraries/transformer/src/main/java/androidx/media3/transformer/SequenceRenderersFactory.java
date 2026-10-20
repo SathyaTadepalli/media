@@ -70,6 +70,7 @@ import androidx.media3.transformer.HardwareBufferFrameReader.RendererWakeupListe
 import com.google.common.base.Supplier;
 import com.google.common.collect.ImmutableList;
 import java.nio.ByteBuffer;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
 import org.checkerframework.checker.nullness.qual.MonotonicNonNull;
@@ -807,6 +808,12 @@ import org.jspecify.annotations.Nullable;
     private long streamStartPositionUs;
     private long offsetToCompositionTimeUs;
 
+    // Input streams whose output hasn't been reached yet. A reused codec keeps emitting the
+    // previous item's frames after onStreamChanged, so output-side state is applied only once
+    // getOutputStreamOffsetUs() switches to the matching stream.
+    private final ArrayDeque<StreamInfo> pendingOutputStreamInfos;
+    @Nullable private StreamInfo outputStreamInfo;
+
     private boolean isReadyToRenderFirstFrame;
 
     private HardwareBufferVideoRenderer(
@@ -834,6 +841,7 @@ import org.jspecify.annotations.Nullable;
       this.lateThresholdToDropInputUs = lateThresholdToDropInputUs;
       this.targetFrameRateHelper = new TargetFrameRateHelper();
       this.rendererTracker = rendererTracker;
+      this.pendingOutputStreamInfos = new ArrayDeque<>();
     }
 
     @Override
@@ -864,6 +872,8 @@ import org.jspecify.annotations.Nullable;
       checkNotNull(hardwareBufferFrameReader)
           .removeRendererWakeupListener(/* rendererWakeupListener= */ this);
       rendererTracker.removeRenderer(this);
+      pendingOutputStreamInfos.clear();
+      outputStreamInfo = null;
     }
 
     @Override
@@ -884,6 +894,8 @@ import org.jspecify.annotations.Nullable;
       super.onPositionReset(positionUs, joining, sampleStreamIsResetToKeyFrame);
       targetFrameRateHelper.onPositionReset();
       isReadyToRenderFirstFrame = false;
+      // super collapses any pending output stream changes into the latest input stream.
+      maybeUpdateOutputStreamInfo();
     }
 
     @Override
@@ -903,8 +915,44 @@ import org.jspecify.annotations.Nullable;
       streamStartPositionUs = startPositionUs;
       offsetToCompositionTimeUs =
           getOffsetToCompositionTimeUs(getTimeline(), mediaPeriodId, offsetUs);
-      targetFrameRateHelper.onStreamChanged(editedMediaItem);
+      pendingOutputStreamInfos.add(
+          new StreamInfo(
+              offsetUs,
+              offsetToCompositionTimeUs,
+              getEditedMediaItemIndex(getTimeline(), mediaPeriodId),
+              editedMediaItem));
       super.onStreamChanged(formats, startPositionUs, offsetUs, mediaPeriodId);
+      maybeUpdateOutputStreamInfo();
+    }
+
+    @Override
+    protected void onProcessedStreamChange() {
+      super.onProcessedStreamChange();
+      maybeUpdateOutputStreamInfo();
+    }
+
+    private void maybeUpdateOutputStreamInfo() {
+      long outputStreamOffsetUs = getOutputStreamOffsetUs();
+      if (outputStreamOffsetUs == C.TIME_UNSET
+          || (outputStreamInfo != null && outputStreamInfo.offsetUs == outputStreamOffsetUs)) {
+        return;
+      }
+      @Nullable StreamInfo matchingStreamInfo = null;
+      for (StreamInfo streamInfo : pendingOutputStreamInfos) {
+        if (streamInfo.offsetUs == outputStreamOffsetUs) {
+          matchingStreamInfo = streamInfo;
+          break;
+        }
+      }
+      if (matchingStreamInfo == null) {
+        return;
+      }
+      while (pendingOutputStreamInfos.peekFirst() != matchingStreamInfo) {
+        pendingOutputStreamInfos.removeFirst();
+      }
+      pendingOutputStreamInfos.removeFirst();
+      outputStreamInfo = matchingStreamInfo;
+      targetFrameRateHelper.onOutputStreamChanged(matchingStreamInfo.editedMediaItem);
     }
 
     @Override
@@ -968,7 +1016,16 @@ import org.jspecify.annotations.Nullable;
     @Override
     protected void renderOutputBufferV21(
         MediaCodecAdapter codec, int index, long presentationTimeUs, long releaseTimeNs) {
-      long sequenceOffsetUs = getOutputStreamOffsetUs() + offsetToCompositionTimeUs;
+      @Nullable StreamInfo currentOutputStreamInfo = outputStreamInfo;
+      long outputOffsetToCompositionTimeUs =
+          currentOutputStreamInfo != null
+              ? currentOutputStreamInfo.offsetToCompositionTimeUs
+              : offsetToCompositionTimeUs;
+      int outputItemIndex =
+          currentOutputStreamInfo != null
+              ? currentOutputStreamInfo.itemIndex
+              : indexOfCurrentItem();
+      long sequenceOffsetUs = getOutputStreamOffsetUs() + outputOffsetToCompositionTimeUs;
       // TODO: b/449956936 - This can probably be replaced by VideoFrameMetadataListener, but the
       // backpressure in processOutputBuffer can't. See what parts of this logic can be moved to
       // vanilla ExoPlayer.
@@ -976,7 +1033,7 @@ import org.jspecify.annotations.Nullable;
           .queueFrame(
               /* presentationTimeUs= */ presentationTimeUs,
               sequenceOffsetUs,
-              indexOfCurrentItem(),
+              outputItemIndex,
               checkNotNull(nextFormat));
       super.renderOutputBufferV21(
           codec, index, presentationTimeUs, /* releaseTimeNs= */ presentationTimeUs * 1000);
@@ -1084,6 +1141,24 @@ import org.jspecify.annotations.Nullable;
 
     private int indexOfCurrentItem() {
       return getEditedMediaItemIndex(getTimeline(), checkNotNull(getMediaPeriodId()));
+    }
+
+    private static final class StreamInfo {
+      private final long offsetUs;
+      private final long offsetToCompositionTimeUs;
+      private final int itemIndex;
+      private final EditedMediaItem editedMediaItem;
+
+      private StreamInfo(
+          long offsetUs,
+          long offsetToCompositionTimeUs,
+          int itemIndex,
+          EditedMediaItem editedMediaItem) {
+        this.offsetUs = offsetUs;
+        this.offsetToCompositionTimeUs = offsetToCompositionTimeUs;
+        this.itemIndex = itemIndex;
+        this.editedMediaItem = editedMediaItem;
+      }
     }
   }
 
@@ -1296,6 +1371,16 @@ import org.jspecify.annotations.Nullable;
           editedMediaItem.frameRate == C.RATE_UNSET_INT
               ? C.TIME_UNSET
               : C.MICROS_PER_SECOND / editedMediaItem.frameRate;
+    }
+
+    /**
+     * Must be called once output reaches {@code editedMediaItem}. Output timestamps restart for
+     * each item, so carrying over the previous item's expected timestamp would drop the new item's
+     * frames until they pass the previous item's last timestamp.
+     */
+    private void onOutputStreamChanged(EditedMediaItem editedMediaItem) {
+      onStreamChanged(editedMediaItem);
+      nextDecoderOutputExpectedTimestampUs = C.TIME_UNSET;
     }
 
     private boolean shouldDropOutputFrame(long presentationTimeUs) {
